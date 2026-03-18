@@ -16,14 +16,34 @@ st.set_page_config(page_title="JAWS Accessibility Agent", layout="wide", page_ic
 class JawsAgent:
     def __init__(self, headless=True):
         options = webdriver.ChromeOptions()
+        
+        # W Streamlit Cloud przeglądarka ZAWSZE musi być w trybie headless
         if headless:
-            options.add_argument("--headless")
+            options.add_argument("--headless") 
+            
         options.add_argument("--window-size=1920,1080")
         options.add_argument("--disable-blink-features=AutomationControlled")
+        
+        # Flagi krytyczne dla środowisk serwerowych / Docker / Streamlit Cloud
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
         
-        self.driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+        try:
+            # PRÓBA 1: Środowisko Streamlit Cloud (Linux)
+            # Szukamy ścieżek z zainstalowanych paczek w packages.txt
+            options.binary_location = "/usr/bin/chromium"
+            service = Service("/usr/bin/chromedriver")
+            self.driver = webdriver.Chrome(service=service, options=options)
+            
+        except Exception as e:
+            # PRÓBA 2: Fallback dla środowiska lokalnego (Windows/Mac)
+            print(f"Błąd uruchamiania Chromium ze ścieżki systemowej: {e}")
+            print("Uruchamiam fallback: webdriver-manager (lokalnie)...")
+            options.binary_location = "" # Czyszczenie ścieżki
+            service = Service(ChromeDriverManager().install())
+            self.driver = webdriver.Chrome(service=service, options=options)
+
         self.actions = ActionChains(self.driver)
         self.logs = []
         self.violations = []
@@ -98,7 +118,7 @@ class JawsAgent:
     def run_scenario(self, url):
         yield "Rozpoczynam ładowanie strony..."
         self.driver.get(url)
-        time.sleep(3)
+        time.sleep(3) # Czekamy na załadowanie (w produkcji użyć WebDriverWait)
         self.log_jaws("Page Load", self.driver.title, "Title")
         yield "Strona załadowana. Rozpoczynam nawigację klawiaturą (Tab/Enter)..."
 
@@ -109,7 +129,7 @@ class JawsAgent:
 
         yield "Symulacja skrótu 'H' (Nagłówki)..."
         # Uproszczony skok do pierwszego H1
-        h1 = self.driver.execute_script("return document.querySelector('h1');")
+        h1 = self.driver.execute_script("return document.querySelector('h1, h2, h3');")
         if h1:
             info = self.driver.execute_script(self.js_acc_info, h1)
             yield self.log_jaws("H", info['name'], info['role'])
@@ -128,7 +148,10 @@ st.markdown("Automatyczny tester WCAG 2.2 symulujący nawigację za pomocą czyt
 with st.sidebar:
     st.header("Konfiguracja Testu")
     target_url = st.text_input("URL do testów:", value="https://www.lyreco.com/webshop/NLBE/wslogin")
-    run_headless = st.checkbox("Uruchom w tle (Headless)", value=True, help="Odznacz, jeśli chcesz widzieć otwierającą się przeglądarkę (tylko lokalnie).")
+    
+    # Przełącznik Headless (Zawsze prawda dla bezpieczeństwa w chmurze, ale opcja jest)
+    run_headless = st.checkbox("Uruchom w tle (Headless)", value=True, help="W Streamlit Cloud zawsze używany jest tryb Headless.")
+    
     start_test = st.button("🚀 Uruchom Audyt JAWS", type="primary", use_container_width=True)
 
 if start_test:
@@ -137,6 +160,7 @@ if start_test:
     log_container = st.empty()
     progress_bar = st.progress(0)
     
+    # Inicjalizacja Agenta (Pamiętaj o wymuszeniu Headless w chmurze)
     agent = JawsAgent(headless=run_headless)
     scenario_generator = agent.run_scenario(target_url)
     
@@ -147,7 +171,7 @@ if start_test:
     step_count = 0
     for step in scenario_generator:
         step_count += 1
-        progress_bar.progress(min(step_count * 10, 100))
+        progress_bar.progress(min(step_count * 15, 100))
         
         if isinstance(step, str):
             output_console += f"> {step}\n"
@@ -181,7 +205,8 @@ if start_test:
 
         with col2:
             st.markdown("### 📸 Ostatni ekran")
-            st.image(result_data["screenshot"])
+            if os.path.exists(result_data["screenshot"]):
+                st.image(result_data["screenshot"])
             
             st.markdown("### 🚨 Naruszenia WCAG (Klawiatura/Focus)")
             if result_data["violations"]:
