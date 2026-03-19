@@ -78,7 +78,7 @@ class JawsAgent:
         
         // Jeśli nie znaleziono po ID, szukamy po tekście przycisku
         if (!targetBtn) {
-            const acceptTexts = ['Akceptuj wszystkie', 'Accept all', 'Akceptuj', 'Zgadzam się', 'Accept', 'Alle accepteren'];
+            const acceptTexts = ['Akceptuj wszystkie', 'Accept all', 'Akceptuj', 'Zgadzam się', 'Accept', 'Accepter tout'];
             let buttons = Array.from(document.querySelectorAll('button, a.btn'));
             targetBtn = buttons.find(b => acceptTexts.some(t => b.innerText.trim().includes(t)));
         }
