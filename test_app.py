@@ -70,45 +70,62 @@ class JawsAgent:
         """
 
     def apply_cookie_bypass(self):
-        """Używa JavaScriptu, aby znaleźć i kliknąć przycisk akceptacji cookies. Działa o wiele stabilniej niż wstrzykiwanie ciasteczek."""
+        """Uniwersalny niszczyciel banerów - usuwa najpopularniejsze systemy CMP z drzewa DOM."""
         script = """
-        // Szukamy po popularnych ID systemów consent (np. OneTrust)
-        let targetBtn = document.querySelector('#onetrust-accept-btn-handler') || 
-                        document.querySelector('[data-testid="uc-accept-all-button"]');
+        // Lista najpopularniejszych kontenerów z banerami cookies
+        const bannerSelectors = [
+            '#usercentrics-root',           // Usercentrics (używane przez Lyreco)
+            '[data-testid="uc-app-container"]', // Inny wariant Usercentrics
+            '#onetrust-consent-sdk',        // OneTrust
+            '#CybotCookiebotDialog',        // Cookiebot
+            '#cookie-notice',               // Różne wtyczki WordPress
+            '#cookie-law-info-bar',         // Różne wtyczki WordPress
+            '.cookie-banner',               // Klasy generyczne
+            '.cc-window',                   // CookieConsent (Osano)
+            '[id*="cookie-banner"]',        // Szukanie po ID
+            '[id*="cookie-consent"]',
+            '[class*="cookie-banner"]',     // Szukanie po klasach
+            '[class*="cookie-consent"]'
+        ];
+
+        let wasRemoved = false;
+
+        // Przechodzimy przez listę i usuwamy wszystko co znajdziemy
+        bannerSelectors.forEach(selector => {
+            let elements = document.querySelectorAll(selector);
+            elements.forEach(el => {
+                el.remove();
+                wasRemoved = true;
+            });
+        });
         
-        // Jeśli nie znaleziono po ID, szukamy po tekście przycisku
-        if (!targetBtn) {
-            const acceptTexts = ['Akceptuj wszystkie', 'Accept all', 'Akceptuj', 'Zgadzam się', 'Accept', 'Accepter tout'];
-            let buttons = Array.from(document.querySelectorAll('button, a.btn'));
-            targetBtn = buttons.find(b => acceptTexts.some(t => b.innerText.trim().includes(t)));
-        }
+        // Czasami banery dodają też modale jako tło, próbujemy je zdjąć
+        let backdrops = document.querySelectorAll('.modal-backdrop, .onetrust-pc-dark-filter, [class*="overlay"], [class*="backdrop"]');
+        backdrops.forEach(bg => bg.remove());
+
+        // Zdejmujemy blokadę scrollowania nałożoną na tło przez baner (odblokowanie body)
+        document.body.style.overflow = 'auto';
+        document.body.style.position = 'static';
         
-        if (targetBtn) {
-            targetBtn.click();
-            return true;
-        }
-        return false;
+        return wasRemoved;
         """
         
         messages = []
         try:
-            messages.append("Szukam banera cookies, aby go zamknąć...")
+            messages.append("Uruchamiam uniwersalny skrypt czyszczący banery zgód...")
+            time.sleep(3) # Dajemy czas na załadowanie skryptów 3rd party
             
-            # Banery ładują się asynchronicznie, więc próbujemy przez 5 sekund
-            clicked = False
-            for _ in range(5):
-                clicked = self.driver.execute_script(script)
-                if clicked:
-                    messages.append("✅ Znaleziono i kliknięto przycisk akceptacji!")
-                    time.sleep(1.5) # Dajemy czas na animację zniknięcia banera z drzewa DOM
-                    break
-                time.sleep(1)
+            removed = self.driver.execute_script(script)
+            
+            if removed:
+                messages.append("✅ Znaleziono i usunięto baner(y) z drzewa DOM! Odblokowano scrollowanie.")
+            else:
+                messages.append("⚠️ Nie znaleziono żadnego znanego banera. (Strona może go nie mieć).")
                 
-            if not clicked:
-                messages.append("⚠️ Nie znaleziono przycisku akceptacji (baner mógł się nie załadować).")
+            time.sleep(1) 
                 
         except Exception as e:
-            messages.append(f"❌ Błąd podczas zamykania banera: {e}")
+            messages.append(f"❌ Błąd podczas usuwania banera: {e}")
             
         return messages
 
@@ -164,7 +181,7 @@ class JawsAgent:
         
         # 2. DOPIERO TERAZ zamykamy baner (jeśli opcja jest włączona)
         if bypass_banner:
-            yield "Opcja omijania włączona. Próbuję usunąć baner zgód..."
+            yield "Opcja omijania włączona. Próbuję usunąć baner zgód z DOM..."
             bypass_messages = self.apply_cookie_bypass()
             for msg in bypass_messages:
                 yield msg
@@ -206,7 +223,7 @@ with st.sidebar:
     bypass_banner_ui = st.checkbox(
         "Pomiń banner RODO/Cookies", 
         value=True, 
-        help="Zaznacz, aby agent automatycznie znalazł i kliknął 'Akceptuj wszystkie' na start."
+        help="Zaznacz, aby agent automatycznie usunął banery systemów CMP (Usercentrics, OneTrust itp.) z drzewa DOM."
     )
     
     run_headless = st.checkbox("Uruchom w tle (Headless)", value=True, help="W Streamlit Cloud zawsze używany jest tryb Headless.")
@@ -216,7 +233,7 @@ with st.sidebar:
 if start_test:
     st.subheader(f"Audyt w toku: {target_url}")
     if bypass_banner_ui:
-        st.info("Test wariantu: **BEZ** bannera (Automatyczna akceptacja aktywna)")
+        st.info("Test wariantu: **BEZ** bannera (Automatyczne usuwanie aktywne)")
     else:
         st.warning("Test wariantu: **Z** bannerem na start")
     
