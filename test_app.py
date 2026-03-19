@@ -29,9 +29,14 @@ class JawsAgent:
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
         
+        # Definicje Cookies Bypass
+        self.bypass_cookies = [
+            {'name': 'consent_check', 'value': 'true', 'domain': 'lyreco.com', 'path': '/'},
+            {'name': 'LyrecoCookie', 'value': 'automated_testing', 'domain': 'lyreco.com', 'path': '/'}
+        ]
+        
         try:
             # PRÓBA 1: Środowisko Streamlit Cloud (Linux)
-            # Szukamy ścieżek z zainstalowanych paczek w packages.txt
             options.binary_location = "/usr/bin/chromium"
             service = Service("/usr/bin/chromedriver")
             self.driver = webdriver.Chrome(service=service, options=options)
@@ -40,7 +45,7 @@ class JawsAgent:
             # PRÓBA 2: Fallback dla środowiska lokalnego (Windows/Mac)
             print(f"Błąd uruchamiania Chromium ze ścieżki systemowej: {e}")
             print("Uruchamiam fallback: webdriver-manager (lokalnie)...")
-            options.binary_location = "" # Czyszczenie ścieżki
+            options.binary_location = "" 
             service = Service(ChromeDriverManager().install())
             self.driver = webdriver.Chrome(service=service, options=options)
 
@@ -48,7 +53,6 @@ class JawsAgent:
         self.logs = []
         self.violations = []
         
-        # Inicjalizacja JS dla obliczania nazwy dostępnościowej
         self.js_acc_info = """
         function getAccInfo(el) {
             if (!el || el === document.body) return {name: 'Body', role: 'document'};
@@ -71,6 +75,23 @@ class JawsAgent:
         return getAccInfo(arguments[0]);
         """
 
+    def apply_cookie_bypass(self, domain_to_load="https://www.lyreco.com"):
+        messages = []
+        try:
+            messages.append(f"Przechodzę do {domain_to_load}/favicon.ico w celu ustalenia kontekstu domeny...")
+            self.driver.get(domain_to_load + "/favicon.ico")
+            time.sleep(1)
+
+            messages.append("Wstrzykuję cookies automatyzacji testów (bypass banner)...")
+            for cookie in self.bypass_cookies:
+                self.driver.add_cookie(cookie)
+            
+            messages.append("✅ Cookies wstrzyknięte. Banner zgód powinien zostać pominięty.")
+        except Exception as e:
+            messages.append(f"❌ Błąd wstrzykiwania cookies bypass: {e}")
+        
+        return messages
+
     def log_jaws(self, action, element_text, role, state=""):
         state_str = f" [{state}]" if state else ""
         log_entry = f"JAWS: '{role}: {element_text}'{state_str} [{action}]"
@@ -79,13 +100,11 @@ class JawsAgent:
 
     def press_key(self, key_name, key_code):
         self.actions.send_keys(key_code).perform()
-        time.sleep(0.5) # Czekamy na reakcję UI
+        time.sleep(0.5)
         active_element = self.driver.switch_to.active_element
         
-        # Wyciągamy dane dostępnościowe
         info = self.driver.execute_script(self.js_acc_info, active_element)
         
-        # WCAG 2.4.7 Focus Visibility Check
         has_focus = self.driver.execute_script(
             "return window.getComputedStyle(arguments[0]).outlineWidth !== '0px' || window.getComputedStyle(arguments[0]).boxShadow !== 'none';", 
             active_element
@@ -115,26 +134,42 @@ class JawsAgent:
         for ann in announcements:
             self.log_jaws("ARIA-live", ann, "alert/status")
 
-    def run_scenario(self, url):
-        yield "Rozpoczynam ładowanie strony..."
-        self.driver.get(url)
-        time.sleep(3) # Czekamy na załadowanie (w produkcji użyć WebDriverWait)
-        self.log_jaws("Page Load", self.driver.title, "Title")
-        yield "Strona załadowana. Rozpoczynam nawigację klawiaturą (Tab/Enter)..."
+    def run_scenario(self, url, bypass_banner=True):
+        yield f"Rozpoczynam audyt dla URL: {url}"
 
-        # Symulacja nawigacji TAB
+        # Sprawdzenie decyzji o bannerze
+        if bypass_banner and "lyreco.com" in url:
+            yield "Włączono opcję omijania banneru. Uruchamiam skrypt..."
+            bypass_messages = self.apply_cookie_bypass()
+            for msg in bypass_messages:
+                yield msg
+            time.sleep(1) 
+        elif bypass_banner:
+            yield "Opcja omijania banneru włączona, ale wspierana jest tylko dla domeny lyreco.com."
+        else:
+            yield "Testowanie wariantu Z BANEREM (omijanie wyłączone)."
+
+        yield f"Nawiguję do docelowej strony: {url}"
+        self.driver.get(url) 
+        time.sleep(3) 
+        
+        self.log_jaws("Page Load", self.driver.title, "Title")
+        yield f"Strona załadowana (Tytuł: {self.driver.title}). Rozpoczynam nawigację klawiaturą..."
+
+        yield "Symuluję nawigację klawiszem [Tab]..."
         for _ in range(5):
             yield self.press_key("Tab", Keys.TAB)
             self.check_aria_live()
 
-        yield "Symulacja skrótu 'H' (Nagłówki)..."
-        # Uproszczony skok do pierwszego H1
-        h1 = self.driver.execute_script("return document.querySelector('h1, h2, h3');")
-        if h1:
-            info = self.driver.execute_script(self.js_acc_info, h1)
+        yield "Symulacja skrótu 'H' (Skok do nagłówków)..."
+        h_element = self.driver.execute_script("return document.querySelector('h1, h2, h3');")
+        if h_element:
+            info = self.driver.execute_script(self.js_acc_info, h_element)
             yield self.log_jaws("H", info['name'], info['role'])
+        else:
+            yield "JAWS: 'Brak nagłówków' [H]"
 
-        yield "Zapisuję stan (Screenshot)..."
+        yield "Zapisuję stan końcowy audytu (Screenshot)..."
         screenshot_path = "current_state.png"
         self.driver.save_screenshot(screenshot_path)
         
@@ -149,29 +184,43 @@ with st.sidebar:
     st.header("Konfiguracja Testu")
     target_url = st.text_input("URL do testów:", value="https://www.lyreco.com/webshop/NLBE/wslogin")
     
-    # Przełącznik Headless (Zawsze prawda dla bezpieczeństwa w chmurze, ale opcja jest)
+    # NOWY CHECKBOX do sterowania banerem
+    bypass_banner_ui = st.checkbox(
+        "Pomiń banner RODO/Cookies", 
+        value=True, 
+        help="Zaznacz, aby wstrzyknąć cookies i ukryć banner zgód na start (tylko Lyreco)."
+    )
+    
     run_headless = st.checkbox("Uruchom w tle (Headless)", value=True, help="W Streamlit Cloud zawsze używany jest tryb Headless.")
     
     start_test = st.button("🚀 Uruchom Audyt JAWS", type="primary", use_container_width=True)
 
 if start_test:
     st.subheader(f"Audyt w toku: {target_url}")
+    if bypass_banner_ui:
+        st.info("Test wariantu: **BEZ** bannera (Bypass aktywny)")
+    else:
+        st.warning("Test wariantu: **Z** bannerem na start")
     
     log_container = st.empty()
     progress_bar = st.progress(0)
     
-    # Inicjalizacja Agenta (Pamiętaj o wymuszeniu Headless w chmurze)
-    agent = JawsAgent(headless=run_headless)
-    scenario_generator = agent.run_scenario(target_url)
+    is_cloud = os.path.exists("/mount/src")
+    headless_mode = True if is_cloud else run_headless
+    
+    agent = JawsAgent(headless=headless_mode)
+    
+    # Przekazujemy wartość checkboxa do agenta!
+    scenario_generator = agent.run_scenario(target_url, bypass_banner=bypass_banner_ui)
     
     output_console = ""
     result_data = None
     
-    # Czytanie z generatora na żywo
     step_count = 0
+    total_steps = 10 
     for step in scenario_generator:
         step_count += 1
-        progress_bar.progress(min(step_count * 15, 100))
+        progress_bar.progress(min(int(step_count * (100 / total_steps)), 100))
         
         if isinstance(step, str):
             output_console += f"> {step}\n"
@@ -187,11 +236,17 @@ if start_test:
         
         with col1:
             st.markdown("### 📝 Logi JAWS (Co słyszy użytkownik)")
-            st.dataframe(result_data["logs"], use_container_width=True)
+            import pandas as pd
+            df_logs = pd.DataFrame(result_data["logs"])
+            if not df_logs.empty:
+                st.dataframe(df_logs[['time', 'action', 'role', 'text', 'state']], use_container_width=True)
+            else:
+                st.info("Brak logów.")
             
-            # Przycisk pobierania JSON
             report_json = json.dumps({
                 "url": target_url,
+                "timestamp": time.time(),
+                "bypass_banner": bypass_banner_ui,
                 "logs": result_data["logs"],
                 "violations": result_data["violations"]
             }, indent=4, ensure_ascii=False)
@@ -199,18 +254,18 @@ if start_test:
             st.download_button(
                 label="📥 Pobierz pełny Raport (JSON)",
                 data=report_json,
-                file_name="jaws_audit_report.json",
+                file_name=f"jaws_audit_report_{'nobanner' if bypass_banner_ui else 'withbanner'}.json",
                 mime="application/json",
             )
 
         with col2:
-            st.markdown("### 📸 Ostatni ekran")
+            st.markdown("### 📸 Stan końcowy strony")
             if os.path.exists(result_data["screenshot"]):
-                st.image(result_data["screenshot"])
+                st.image(result_data["screenshot"], caption=f"Zrzut ekranu po sekwencji (Bypass: {bypass_banner_ui}).")
             
-            st.markdown("### 🚨 Naruszenia WCAG (Klawiatura/Focus)")
+            st.markdown("### 🚨 Automatycznie wykryte naruszenia WCAG (Klawiatura/Focus)")
             if result_data["violations"]:
                 for v in result_data["violations"]:
                     st.error(f"**{v['type']}**: {v['element']} - {v['issue']}")
             else:
-                st.success("Nie wykryto oczywistych naruszeń w zbadanej ścieżce.")
+                st.success("W zbadanej ścieżce nie wykryto oczywistych naruszeń WCAG (dot. wskaźnika focusu).")
