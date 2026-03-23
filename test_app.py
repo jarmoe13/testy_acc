@@ -2,6 +2,8 @@ import streamlit as st
 import time
 import json
 import os
+import io
+from gtts import gTTS
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
@@ -11,6 +13,39 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 # --- CONFIGURATION ---
 st.set_page_config(page_title="JAWS Accessibility Agent", layout="wide", page_icon="🧑‍🦯")
+
+# --- AUDIO GENERATOR ---
+def generate_audio_log(logs):
+    """Przetwarza logi JAWS na plik audio."""
+    if not logs:
+        return None
+        
+    spoken_text = "Rozpoczynam audyt. "
+    for entry in logs:
+        action = entry['action']
+        role = entry['role']
+        text = entry['text']
+        
+        if role == "Title":
+            spoken_text += f"Załadowano stronę. Tytuł: {text}. "
+        elif action == "Tab":
+            if "Pusty focus" not in text:
+                spoken_text += f"{role}, {text}. "
+        elif action == "H":
+            spoken_text += f"Nagłówek, {role}, {text}. "
+        elif action == "ARIA-live":
+            spoken_text += f"Komunikat ekranowy: {text}. "
+
+    try:
+        # Generowanie audio (lang='pl' dla polskiego lektora)
+        tts = gTTS(text=spoken_text, lang='pl', slow=False)
+        fp = io.BytesIO()
+        tts.write_to_fp(fp)
+        fp.seek(0)
+        return fp
+    except Exception as e:
+        print(f"Błąd generowania audio: {e}")
+        return None
 
 # --- JAWS SIMULATOR CLASS ---
 class JawsAgent:
@@ -116,11 +151,9 @@ class JawsAgent:
         return log_entry
 
     def press_key(self, key_name, key_code):
-        # 1. Próba wciśnięcia klawisza (np. TAB) - robimy to bezpiecznie
         try:
             self.actions.send_keys(key_code).perform()
         except Exception:
-            # Jeśli akcja zawiedzie, uderzamy w główny tag html/body
             try:
                 self.driver.find_element(By.TAG_NAME, 'body').send_keys(key_code)
             except:
@@ -128,13 +161,10 @@ class JawsAgent:
                 
         time.sleep(0.5)
         
-        # 2. Bezpieczne namierzanie aktywnego elementu (ZABEZPIECZENIE PRZED NoSuchElementException)
         try:
             active_element = self.driver.switch_to.active_element
-            # Próbujemy odpytać element, by upewnić się, że nie jest martwy (stale)
             active_element.tag_name
         except Exception:
-            # Awaryjnie pobieramy element z użyciem czystego JavaScriptu
             try:
                 active_element = self.driver.execute_script("return document.activeElement || document.body;")
             except:
@@ -143,11 +173,9 @@ class JawsAgent:
         if not active_element:
             return self.log_jaws(key_name, "[Pusty focus lub utracono element]", "unknown")
 
-        # 3. Pobranie danych o elemencie z JS
         try:
             info = self.driver.execute_script(self.js_acc_info, active_element)
             
-            # 4. Badanie widoczności outline (WCAG 2.4.7)
             has_focus = self.driver.execute_script(
                 "return window.getComputedStyle(arguments[0]).outlineWidth !== '0px' || window.getComputedStyle(arguments[0]).boxShadow !== 'none';", 
                 active_element
@@ -195,9 +223,16 @@ class JawsAgent:
             for msg in bypass_messages:
                 yield msg
             
-            # Resetujemy focus przeglądarki awaryjnie po usunięciu banera
+            # --- SPORTANO FIX: Twardy reset focusu na <body> po usunięciu modala ---
             try:
-                self.driver.execute_script("document.body.focus();")
+                self.driver.execute_script("""
+                    let b = document.querySelector('body');
+                    if(b) {
+                        b.tabIndex = -1;
+                        b.focus();
+                    }
+                """)
+                yield "Wykonano twardy reset focusu (zabezpieczenie przed błędem nawigacji)."
             except:
                 pass
         else:
@@ -294,6 +329,15 @@ if start_test:
                 st.dataframe(df_logs[['time', 'action', 'role', 'text', 'state']], use_container_width=True)
             else:
                 st.info("Brak logów.")
+            
+            # --- DODANY ODTWARZACZ AUDIO ---
+            st.markdown("### 🎧 Posłuchaj doświadczenia użytkownika (Audio)")
+            with st.spinner("Generowanie pliku audio..."):
+                audio_file = generate_audio_log(result_data["logs"])
+                if audio_file:
+                    st.audio(audio_file, format='audio/mp3')
+                else:
+                    st.warning("Nie udało się wygenerować audio.")
             
             report_json = json.dumps({
                 "url": target_url,
