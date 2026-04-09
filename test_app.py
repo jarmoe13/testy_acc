@@ -16,35 +16,35 @@ st.set_page_config(page_title="JAWS Accessibility Agent", layout="wide", page_ic
 
 # --- AUDIO GENERATOR ---
 def generate_audio_log(logs):
-    """Przetwarza logi JAWS na plik audio."""
+    """Processes JAWS logs into an audio file."""
     if not logs:
         return None
         
-    spoken_text = "Rozpoczynam audyt. "
+    spoken_text = "Starting audit. "
     for entry in logs:
         action = entry['action']
         role = entry['role']
         text = entry['text']
         
         if role == "Title":
-            spoken_text += f"Załadowano stronę. Tytuł: {text}. "
+            spoken_text += f"Page loaded. Title: {text}. "
         elif action == "Tab":
-            if "Pusty focus" not in text:
+            if "Empty focus" not in text:
                 spoken_text += f"{role}, {text}. "
         elif action == "H":
-            spoken_text += f"Nagłówek, {role}, {text}. "
+            spoken_text += f"Heading, {role}, {text}. "
         elif action == "ARIA-live":
-            spoken_text += f"Komunikat ekranowy: {text}. "
+            spoken_text += f"Screen announcement: {text}. "
 
     try:
-        # Generowanie audio (lang='pl' dla polskiego lektora)
-        tts = gTTS(text=spoken_text, lang='pl', slow=False)
+        # Generating audio (lang='en' for English voice)
+        tts = gTTS(text=spoken_text, lang='en', slow=False)
         fp = io.BytesIO()
         tts.write_to_fp(fp)
         fp.seek(0)
         return fp
     except Exception as e:
-        print(f"Błąd generowania audio: {e}")
+        print(f"Audio generation error: {e}")
         return None
 
 # --- JAWS SIMULATOR CLASS ---
@@ -132,16 +132,16 @@ class JawsAgent:
         """
         messages = []
         try:
-            messages.append("Uruchamiam uniwersalny skrypt czyszczący banery zgód...")
+            messages.append("Running universal consent banner cleanup script...")
             time.sleep(3) 
             removed = self.driver.execute_script(script)
             if removed:
-                messages.append("✅ Znaleziono i usunięto baner(y) z drzewa DOM! Odblokowano scrollowanie.")
+                messages.append("✅ Found and removed banner(s) from DOM! Scrolling unlocked.")
             else:
-                messages.append("⚠️ Nie znaleziono żadnego znanego banera. (Strona może go nie mieć).")
+                messages.append("⚠️ No known banner found. (The page might not have one).")
             time.sleep(1) 
         except Exception as e:
-            messages.append(f"❌ Błąd podczas usuwania banera: {e}")
+            messages.append(f"❌ Error during banner removal: {e}")
         return messages
 
     def log_jaws(self, action, element_text, role, state=""):
@@ -171,7 +171,7 @@ class JawsAgent:
                 active_element = None
 
         if not active_element:
-            return self.log_jaws(key_name, "[Pusty focus lub utracono element]", "unknown")
+            return self.log_jaws(key_name, "[Empty focus or element lost]", "unknown")
 
         try:
             info = self.driver.execute_script(self.js_acc_info, active_element)
@@ -184,10 +184,10 @@ class JawsAgent:
                 self.violations.append({
                     "type": "Focus Visibility (2.4.7)", 
                     "element": info['name'], 
-                    "issue": "Brak wyraźnego wskaźnika focusu (outline/box-shadow)."
+                    "issue": "Missing clear focus indicator (outline/box-shadow)."
                 })
         except Exception:
-            return self.log_jaws(key_name, "[Błąd analizy elementu]", "error")
+            return self.log_jaws(key_name, "[Element analysis error]", "error")
 
         return self.log_jaws(key_name, info['name'], info['role'])
 
@@ -211,19 +211,19 @@ class JawsAgent:
             pass
 
     def run_scenario(self, url, bypass_banner=True):
-        yield f"Rozpoczynam audyt dla URL: {url}"
+        yield f"Starting audit for URL: {url}"
 
-        yield f"Nawiguję do: {url}"
+        yield f"Navigating to: {url}"
         self.driver.get(url) 
         time.sleep(3) 
         
         if bypass_banner:
-            yield "Opcja omijania włączona. Próbuję usunąć baner zgód z DOM..."
+            yield "Bypass option enabled. Attempting to remove consent banner from DOM..."
             bypass_messages = self.apply_cookie_bypass()
             for msg in bypass_messages:
                 yield msg
             
-            # --- SPORTANO FIX: Twardy reset focusu na <body> po usunięciu modala ---
+            # --- SPORTANO FIX: Hard focus reset to <body> after modal removal ---
             try:
                 self.driver.execute_script("""
                     let b = document.querySelector('body');
@@ -232,31 +232,31 @@ class JawsAgent:
                         b.focus();
                     }
                 """)
-                yield "Wykonano twardy reset focusu (zabezpieczenie przed błędem nawigacji)."
+                yield "Performed hard focus reset (navigation error safeguard)."
             except:
                 pass
         else:
-            yield "Testowanie wariantu Z BANEREM (omijanie wyłączone)."
+            yield "Testing WITH BANNER variant (bypass disabled)."
 
         self.log_jaws("Page Load", self.driver.title, "Title")
-        yield f"Strona gotowa. Rozpoczynam nawigację klawiaturą (Tab)..."
+        yield f"Page ready. Starting keyboard navigation (Tab)..."
 
         for _ in range(5):
             yield self.press_key("Tab", Keys.TAB)
             self.check_aria_live()
 
-        yield "Symulacja skrótu 'H' (Skok do nagłówków)..."
+        yield "Simulating 'H' shortcut (Jump to headings)..."
         try:
             h_element = self.driver.execute_script("return document.querySelector('h1, h2, h3');")
             if h_element:
                 info = self.driver.execute_script(self.js_acc_info, h_element)
                 yield self.log_jaws("H", info['name'], info['role'])
             else:
-                yield "JAWS: 'Brak nagłówków' [H]"
+                yield "JAWS: 'No headings found' [H]"
         except:
             pass
 
-        yield "Zapisuję stan końcowy audytu (Screenshot)..."
+        yield "Saving final audit state (Screenshot)..."
         screenshot_path = "current_state.png"
         try:
             self.driver.save_screenshot(screenshot_path)
@@ -268,28 +268,28 @@ class JawsAgent:
 
 # --- STREAMLIT UI ---
 st.title("🧑‍🦯 JAWS Accessibility E2E Agent")
-st.markdown("Automatyczny tester WCAG 2.2 symulujący nawigację za pomocą czytnika ekranu (Tylko klawiatura).")
+st.markdown("Automated WCAG 2.2 tester simulating screen reader navigation (Keyboard only).")
 
 with st.sidebar:
-    st.header("Konfiguracja Testu")
-    target_url = st.text_input("URL do testów:", value="https://www.lyreco.com/webshop/NLBE/wslogin")
+    st.header("Test Configuration")
+    target_url = st.text_input("Target URL:", value="https://www.lyreco.com/webshop/NLBE/wslogin")
     
     bypass_banner_ui = st.checkbox(
-        "Pomiń banner RODO/Cookies", 
+        "Bypass GDPR/Cookie Banner", 
         value=True, 
-        help="Zaznacz, aby agent automatycznie usunął banery systemów CMP z drzewa DOM."
+        help="Check to let the agent automatically remove CMP banners from the DOM."
     )
     
-    run_headless = st.checkbox("Uruchom w tle (Headless)", value=True, help="W Streamlit Cloud zawsze używany jest tryb Headless.")
+    run_headless = st.checkbox("Run in background (Headless)", value=True, help="Streamlit Cloud always uses Headless mode.")
     
-    start_test = st.button("🚀 Uruchom Audyt JAWS", type="primary", use_container_width=True)
+    start_test = st.button("🚀 Run JAWS Audit", type="primary", use_container_width=True)
 
 if start_test:
-    st.subheader(f"Audyt w toku: {target_url}")
+    st.subheader(f"Audit in progress: {target_url}")
     if bypass_banner_ui:
-        st.info("Test wariantu: **BEZ** bannera (Automatyczne usuwanie aktywne)")
+        st.info("Testing variant: **WITHOUT** banner (Auto-removal active)")
     else:
-        st.warning("Test wariantu: **Z** bannerem na start")
+        st.warning("Testing variant: **WITH** banner on start")
     
     log_container = st.empty()
     progress_bar = st.progress(0)
@@ -317,27 +317,27 @@ if start_test:
             progress_bar.progress(100)
 
     if result_data:
-        st.success("Audyt zakończony!")
+        st.success("Audit completed!")
         
         col1, col2 = st.columns([1, 1])
         
         with col1:
-            st.markdown("### 📝 Logi JAWS (Co słyszy użytkownik)")
+            st.markdown("### 📝 JAWS Logs (What the user hears)")
             import pandas as pd
             df_logs = pd.DataFrame(result_data["logs"])
             if not df_logs.empty:
                 st.dataframe(df_logs[['time', 'action', 'role', 'text', 'state']], use_container_width=True)
             else:
-                st.info("Brak logów.")
+                st.info("No logs.")
             
             # --- DODANY ODTWARZACZ AUDIO ---
-            st.markdown("### 🎧 Posłuchaj doświadczenia użytkownika (Audio)")
-            with st.spinner("Generowanie pliku audio..."):
+            st.markdown("### 🎧 Listen to the user experience (Audio)")
+            with st.spinner("Generating audio file..."):
                 audio_file = generate_audio_log(result_data["logs"])
                 if audio_file:
                     st.audio(audio_file, format='audio/mp3')
                 else:
-                    st.warning("Nie udało się wygenerować audio.")
+                    st.warning("Failed to generate audio.")
             
             report_json = json.dumps({
                 "url": target_url,
@@ -348,20 +348,20 @@ if start_test:
             }, indent=4, ensure_ascii=False)
             
             st.download_button(
-                label="📥 Pobierz pełny Raport (JSON)",
+                label="📥 Download Full Report (JSON)",
                 data=report_json,
                 file_name=f"jaws_audit_report_{'nobanner' if bypass_banner_ui else 'withbanner'}.json",
                 mime="application/json",
             )
 
         with col2:
-            st.markdown("### 📸 Stan końcowy strony")
+            st.markdown("### 📸 Final page state")
             if os.path.exists(result_data["screenshot"]):
-                st.image(result_data["screenshot"], caption=f"Zrzut ekranu po sekwencji (Bypass: {bypass_banner_ui}).")
+                st.image(result_data["screenshot"], caption=f"Screenshot after sequence (Bypass: {bypass_banner_ui}).")
             
-            st.markdown("### 🚨 Automatycznie wykryte naruszenia WCAG (Klawiatura/Focus)")
+            st.markdown("### 🚨 Automatically detected WCAG violations (Keyboard/Focus)")
             if result_data["violations"]:
                 for v in result_data["violations"]:
                     st.error(f"**{v['type']}**: {v['element']} - {v['issue']}")
             else:
-                st.success("W zbadanej ścieżce nie wykryto oczywistych naruszeń WCAG (dot. wskaźnika focusu).")
+                st.success("No obvious WCAG violations detected in the tested path (regarding focus indicator).")
