@@ -12,15 +12,15 @@ from selenium.webdriver.common.action_chains import ActionChains
 from webdriver_manager.chrome import ChromeDriverManager
 
 # --- CONFIGURATION ---
-st.set_page_config(page_title="JAWS Accessibility Agent", layout="wide", page_icon="🧑‍🦯")
+st.set_page_config(page_title="SRSA Accessibility Agent", layout="wide", page_icon="🧑‍🦯")
 
 # --- AUDIO GENERATOR ---
 def generate_audio_log(logs):
-    """Processes JAWS logs into an audio file."""
+    """Processes SRSA logs into an audio file."""
     if not logs:
         return None
         
-    spoken_text = "Starting audit. "
+    spoken_text = "" # Usunięto "Starting audit. "
     for entry in logs:
         action = entry['action']
         role = entry['role']
@@ -47,8 +47,8 @@ def generate_audio_log(logs):
         print(f"Audio generation error: {e}")
         return None
 
-# --- JAWS SIMULATOR CLASS ---
-class JawsAgent:
+# --- SRSA SIMULATOR CLASS ---
+class SRSA_Agent:
     def __init__(self, headless=True):
         options = webdriver.ChromeOptions()
         
@@ -144,9 +144,9 @@ class JawsAgent:
             messages.append(f"❌ Error during banner removal: {e}")
         return messages
 
-    def log_jaws(self, action, element_text, role, state=""):
+    def log_srsa(self, action, element_text, role, state=""):
         state_str = f" [{state}]" if state else ""
-        log_entry = f"JAWS: '{role}: {element_text}'{state_str} [{action}]"
+        log_entry = f"SRSA: '{role}: {element_text}'{state_str} [{action}]"
         self.logs.append({"action": action, "role": role, "text": element_text, "state": state, "time": time.strftime("%H:%M:%S")})
         return log_entry
 
@@ -171,7 +171,7 @@ class JawsAgent:
                 active_element = None
 
         if not active_element:
-            return self.log_jaws(key_name, "[Empty focus or element lost]", "unknown")
+            return self.log_srsa(key_name, "[Empty focus or element lost]", "unknown")
 
         try:
             info = self.driver.execute_script(self.js_acc_info, active_element)
@@ -187,9 +187,9 @@ class JawsAgent:
                     "issue": "Missing clear focus indicator (outline/box-shadow)."
                 })
         except Exception:
-            return self.log_jaws(key_name, "[Element analysis error]", "error")
+            return self.log_srsa(key_name, "[Element analysis error]", "error")
 
-        return self.log_jaws(key_name, info['name'], info['role'])
+        return self.log_srsa(key_name, info['name'], info['role'])
 
     def check_aria_live(self):
         script = """
@@ -206,7 +206,7 @@ class JawsAgent:
         try:
             announcements = self.driver.execute_script(script)
             for ann in announcements:
-                self.log_jaws("ARIA-live", ann, "alert/status")
+                self.log_srsa("ARIA-live", ann, "alert/status")
         except:
             pass
 
@@ -238,7 +238,7 @@ class JawsAgent:
         else:
             yield "Testing WITH BANNER variant (bypass disabled)."
 
-        self.log_jaws("Page Load", self.driver.title, "Title")
+        self.log_srsa("Page Load", self.driver.title, "Title")
         yield f"Page ready. Starting keyboard navigation (Tab)..."
 
         for _ in range(5):
@@ -250,9 +250,9 @@ class JawsAgent:
             h_element = self.driver.execute_script("return document.querySelector('h1, h2, h3');")
             if h_element:
                 info = self.driver.execute_script(self.js_acc_info, h_element)
-                yield self.log_jaws("H", info['name'], info['role'])
+                yield self.log_srsa("H", info['name'], info['role'])
             else:
-                yield "JAWS: 'No headings found' [H]"
+                yield "SRSA: 'No headings found' [H]"
         except:
             pass
 
@@ -267,7 +267,7 @@ class JawsAgent:
         yield {"status": "done", "screenshot": screenshot_path, "logs": self.logs, "violations": self.violations}
 
 # --- STREAMLIT UI ---
-st.title("🧑‍🦯 JAWS Accessibility E2E Agent")
+st.title("🧑‍🦯 Screen Reader Simulation Agent (SRSA)")
 st.markdown("Automated WCAG 2.2 tester simulating screen reader navigation (Keyboard only).")
 
 with st.sidebar:
@@ -282,7 +282,7 @@ with st.sidebar:
     
     run_headless = st.checkbox("Run in background (Headless)", value=True, help="Streamlit Cloud always uses Headless mode.")
     
-    start_test = st.button("🚀 Run JAWS Audit", type="primary", use_container_width=True)
+    start_test = st.button("🚀 Run SRSA Audit", type="primary", use_container_width=True)
 
 if start_test:
     st.subheader(f"Audit in progress: {target_url}")
@@ -297,7 +297,7 @@ if start_test:
     is_cloud = os.path.exists("/mount/src")
     headless_mode = True if is_cloud else run_headless
     
-    agent = JawsAgent(headless=headless_mode)
+    agent = SRSA_Agent(headless=headless_mode)
     scenario_generator = agent.run_scenario(target_url, bypass_banner=bypass_banner_ui)
     
     output_console = ""
@@ -322,7 +322,7 @@ if start_test:
         col1, col2 = st.columns([1, 1])
         
         with col1:
-            st.markdown("### 📝 JAWS Logs (What the user hears)")
+            st.markdown("### 📝 SRSA Logs (What the user hears)")
             import pandas as pd
             df_logs = pd.DataFrame(result_data["logs"])
             if not df_logs.empty:
@@ -350,7 +350,7 @@ if start_test:
             st.download_button(
                 label="📥 Download Full Report (JSON)",
                 data=report_json,
-                file_name=f"jaws_audit_report_{'nobanner' if bypass_banner_ui else 'withbanner'}.json",
+                file_name=f"srsa_audit_report_{'nobanner' if bypass_banner_ui else 'withbanner'}.json",
                 mime="application/json",
             )
 
